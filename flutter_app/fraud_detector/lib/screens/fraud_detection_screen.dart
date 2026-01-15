@@ -32,6 +32,7 @@ class BatchResult {
 class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
   final _formKey = GlobalKey<FormState>();
   final _controllers = {
+    'upiId': TextEditingController(),
     'amount': TextEditingController(),
     'deviation': TextEditingController(),
     'anomaly': TextEditingController(),
@@ -40,6 +41,7 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
     'frequency': TextEditingController(),
   };
 
+  String _selectedMode = 'fast'; // 'fast' or 'accurate'
   bool _isLoading = false;
   FraudPrediction? _prediction;
   String? _errorMessage;
@@ -73,12 +75,14 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
 
     try {
       final transaction = TransactionInput(
+        upiId: _controllers['upiId']!.text.trim(),
         transactionAmount: double.parse(_controllers['amount']!.text),
         transactionAmountDeviation: double.parse(_controllers['deviation']!.text),
         timeAnomaly: double.parse(_controllers['anomaly']!.text),
         locationDistance: double.parse(_controllers['distance']!.text),
         merchantNovelty: double.parse(_controllers['novelty']!.text),
         transactionFrequency: double.parse(_controllers['frequency']!.text),
+        mode: _selectedMode,
       );
 
       final prediction = await _apiService.predictFraud(transaction);
@@ -145,6 +149,7 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
       
       // Check if first row is header (contains expected column names)
       if (firstRow.any((cell) => 
+          cell.contains('upiid') || 
           cell.contains('transactionamount') || 
           cell.contains('amount') ||
           cell.contains('deviation'))) {
@@ -158,18 +163,20 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
       for (int i = startRowIndex; i < rows.length; i++) {
         try {
           final row = rows[i];
-          if (row.length < 6) {
-            parseErrors.add('Row ${i + 1}: Insufficient columns (expected 6)');
+          if (row.length < 7) {
+            parseErrors.add('Row ${i + 1}: Insufficient columns (expected 7: upiId + 6 features)');
             continue;
           }
 
           final transaction = TransactionInput(
-            transactionAmount: _parseDouble(row[0], 'transactionAmount', i + 1),
-            transactionAmountDeviation: _parseDouble(row[1], 'transactionAmountDeviation', i + 1),
-            timeAnomaly: _parseDouble(row[2], 'timeAnomaly', i + 1),
-            locationDistance: _parseDouble(row[3], 'locationDistance', i + 1),
-            merchantNovelty: _parseDouble(row[4], 'merchantNovelty', i + 1),
-            transactionFrequency: _parseDouble(row[5], 'transactionFrequency', i + 1),
+            upiId: row[0]?.toString().trim() ?? 'unknown@upi',
+            transactionAmount: _parseDouble(row[1], 'transactionAmount', i + 1),
+            transactionAmountDeviation: _parseDouble(row[2], 'transactionAmountDeviation', i + 1),
+            timeAnomaly: _parseDouble(row[3], 'timeAnomaly', i + 1),
+            locationDistance: _parseDouble(row[4], 'locationDistance', i + 1),
+            merchantNovelty: _parseDouble(row[5], 'merchantNovelty', i + 1),
+            transactionFrequency: _parseDouble(row[6], 'transactionFrequency', i + 1),
+            mode: _selectedMode, // Use selected mode for batch processing
           );
 
           transactions.add(transaction);
@@ -250,6 +257,9 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
             prediction: FraudPrediction(
               fraud: false,
               riskScore: 0.0,
+              modelUsed: 'fast',
+              recurringFraudUpi: false,
+              fraudCount: 0,
               explanation: 'Error: ${e.toString()}',
             ),
             rowNumber: rowNumber,
@@ -297,12 +307,14 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
     final fraudCount = _batchResults.where((r) => r.prediction.fraud).length;
     final safeCount = total - fraudCount;
     final fraudPercentage = total > 0 ? (fraudCount / total * 100) : 0.0;
+    final recurringFraud = _batchResults.where((r) => r.prediction.recurringFraudUpi).length;
 
     return {
       'total': total,
       'fraud': fraudCount,
       'safe': safeCount,
       'fraudPercentage': fraudPercentage,
+      'recurringFraud': recurringFraud,
     };
   }
 
@@ -465,6 +477,43 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
                 ),
               ],
             ),
+            // Recurring Fraud Row
+            if (stats['recurringFraud'] > 0) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.shade300),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning, color: Colors.red.shade900, size: 24),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Recurring Fraud UPIs Detected',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red.shade900,
+                              fontSize: 14,
+                            ),
+                          ),
+                          Text(
+                            '${stats['recurringFraud']} UPI ID(s) with 3+ fraud records',
+                            style: TextStyle(color: Colors.red.shade700, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             Row(
               children: [
@@ -589,6 +638,42 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
               Text('Transaction Details', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 24),
               _buildTextField(
+                  controller: _controllers['upiId']!,
+                  label: 'UPI ID',
+                  hint: 'e.g., user123@upi',
+                  icon: Icons.person,
+                  validator: _validateRequiredText,
+                  keyboardType: TextInputType.text),
+              const SizedBox(height: 16),
+              // Model Mode Selection
+              Text('Model Mode', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: RadioListTile<String>(
+                      title: const Text('⚡ Fast Scan'),
+                      subtitle: const Text('Quick prediction'),
+                      value: 'fast',
+                      groupValue: _selectedMode,
+                      onChanged: (value) => setState(() => _selectedMode = value!),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                  Expanded(
+                    child: RadioListTile<String>(
+                      title: const Text('🧠 Deep Analysis'),
+                      subtitle: const Text('High accuracy'),
+                      value: 'accurate',
+                      groupValue: _selectedMode,
+                      onChanged: (value) => setState(() => _selectedMode = value!),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              _buildTextField(
                   controller: _controllers['amount']!,
                   label: 'Amount (₹)',
                   hint: 'e.g., 150.50',
@@ -686,11 +771,12 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
     required String hint,
     required IconData icon,
     required String? Function(String?) validator,
+    TextInputType? keyboardType,
   }) {
     return TextFormField(
       controller: controller,
       decoration: InputDecoration(labelText: label, hintText: hint, prefixIcon: Icon(icon, size: 20)),
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      keyboardType: keyboardType ?? const TextInputType.numberWithOptions(decimal: true),
       validator: validator,
     );
   }
@@ -764,7 +850,55 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
             ],
           ),
           const SizedBox(height: 16),
-          Text('Confidence: $riskPercentage%', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: color)),
+          Row(
+            children: [
+              Text('Confidence: $riskPercentage%', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: color)),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: prediction.modelUsed == 'accurate' ? Colors.blue : Colors.orange,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  prediction.modelUsed == 'accurate' ? '🧠 Deep' : '⚡ Fast',
+                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          // Recurring Fraud Warning
+          if (prediction.recurringFraudUpi) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.shade900,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.warning, color: Colors.white, size: 24),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '⚠️ RECURRING FRAUD UPI',
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
+                        Text(
+                          'This UPI ID has ${prediction.fraudCount} fraud record(s). High risk!',
+                          style: const TextStyle(color: Colors.white70, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           if (prediction.explanation != null && prediction.explanation!.isNotEmpty) ...[
             const SizedBox(height: 24),
             Divider(color: color.withOpacity(0.3)),
@@ -818,6 +952,11 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
     return null;
   }
 
+  String? _validateRequiredText(String? value) {
+    if (value == null || value.trim().isEmpty) return 'This field is required';
+    return null;
+  }
+
   /// Build batch results table section
   Widget _buildBatchResultsSection() {
     if (_filteredBatchResults.isEmpty) {
@@ -867,19 +1006,26 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
               ),
               columns: const [
                 DataColumn(label: Text('Row #')),
+                DataColumn(label: Text('UPI ID')),
                 DataColumn(label: Text('Amount'), numeric: true),
                 DataColumn(label: Text('Distance (km)'), numeric: true),
                 DataColumn(label: Text('Time Anomaly'), numeric: true),
                 DataColumn(label: Text('Risk %'), numeric: true),
+                DataColumn(label: Text('Model')),
                 DataColumn(label: Text('Status')),
                 DataColumn(label: Text('Explanation'), tooltip: 'AI Analysis Explanation'),
               ],
               rows: _filteredBatchResults.map((result) {
                 final isFraud = result.prediction.fraud;
+                final isRecurringFraud = result.prediction.recurringFraudUpi;
                 final riskPercentage = (result.prediction.riskScore * 100).toStringAsFixed(1);
-                final backgroundColor = isFraud
-                    ? Theme.of(context).colorScheme.errorContainer.withOpacity(0.3)
-                    : const Color(0xFFD1FAE5).withOpacity(0.5);
+                
+                // Highlight recurring fraud more prominently
+                final backgroundColor = isRecurringFraud
+                    ? Colors.red.shade900.withOpacity(0.2)
+                    : isFraud
+                        ? Theme.of(context).colorScheme.errorContainer.withOpacity(0.3)
+                        : const Color(0xFFD1FAE5).withOpacity(0.5);
 
                 return DataRow(
                   color: WidgetStateProperty.resolveWith((states) {
@@ -890,6 +1036,26 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
                   }),
                   cells: [
                     DataCell(Text('#${result.rowNumber}')),
+                    DataCell(
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              result.transaction.upiId,
+                              style: TextStyle(
+                                fontWeight: isRecurringFraud ? FontWeight.bold : FontWeight.normal,
+                                color: isRecurringFraud ? Colors.red.shade900 : null,
+                              ),
+                            ),
+                          ),
+                          if (isRecurringFraud) ...[
+                            const SizedBox(width: 4),
+                            const Icon(Icons.warning, size: 16, color: Colors.red),
+                          ],
+                        ],
+                      ),
+                    ),
                     DataCell(Text(
                       result.transaction.transactionAmount.toStringAsFixed(2),
                       style: const TextStyle(fontWeight: FontWeight.w500),
@@ -903,15 +1069,43 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
                         color: isFraud ? Colors.red : Colors.green,
                       ),
                     )),
+                    DataCell(
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: result.prediction.modelUsed == 'accurate' ? Colors.blue : Colors.orange,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          result.prediction.modelUsed == 'accurate' ? '🧠' : '⚡',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ),
                     DataCell(_buildStatusBadge(isFraud)),
                     DataCell(
                       ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 300),
-                        child: Text(
-                          result.prediction.explanation ?? 'No explanation available',
-                          style: Theme.of(context).textTheme.bodySmall,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (isRecurringFraud)
+                              Text(
+                                '⚠️ ${result.prediction.fraudCount} fraud records',
+                                style: TextStyle(
+                                  color: Colors.red.shade900,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            Text(
+                              result.prediction.explanation ?? 'No explanation available',
+                              style: Theme.of(context).textTheme.bodySmall,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                         ),
                       ),
                     ),

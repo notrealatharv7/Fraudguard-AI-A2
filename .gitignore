@@ -63,3 +63,5 @@ Thumbs.db
 *.temp
 test_backend.py
 
+# Runtime data
+fraud_history.json

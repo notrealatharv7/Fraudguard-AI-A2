@@ -1,6 +1,6 @@
 """
-Fraud Detection API - FastAPI Backend
-This API receives transaction data and returns fraud predictions.
+Fraud Detection API - FastAPI Backend with Dual Models
+This API supports both fast and accurate models, UPI tracking, and recurring fraud detection.
 """
 
 from fastapi import FastAPI, HTTPException
@@ -8,15 +8,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import joblib
 import os
+import json
 import numpy as np
 import requests
-from typing import Optional
+from typing import Optional, Literal
+from datetime import datetime
 
 # Initialize FastAPI app
 app = FastAPI(
     title="Fraud Detection API",
-    description="API for detecting fraudulent transactions using ML",
-    version="1.0.0"
+    description="API for detecting fraudulent transactions using dual ML models with UPI tracking",
+    version="2.0.0"
 )
 
 # Enable CORS for Flutter app
@@ -28,147 +30,142 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global variable to store the loaded model
-model = None
-# Model path - works both locally and in Docker
-# Try relative path first (for Docker), then parent directory (for local dev)
-if os.path.exists("ml/model.pkl"):
-    MODEL_PATH = "ml/model.pkl"
-else:
-    MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "ml", "model.pkl")
+# Global variables for loaded models
+model_fast = None
+model_accurate = None
+
+# Explanation service URL
+# - Local/Docker: http://explanation_service:8001/explain
+# - Railway: set EXPLANATION_SERVICE_URL in Railway Variables
+EXPLANATION_SERVICE_URL = os.getenv(
+    "EXPLANATION_SERVICE_URL",
+    "https://fraudguard-ai-m3-production-619d.up.railway.app"
+)
+
+
+# # Model paths - works both locally and in Docker
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+FAST_MODEL_PATH = os.path.join(BASE_DIR, "ml", "model_fast.pkl")
+ACCURATE_MODEL_PATH = os.path.join(BASE_DIR, "ml", "model_accurate.pkl")
+
+FRAUD_HISTORY_FILE = os.path.join(BASE_DIR, "fraud_history.json")
+
 
 # Pydantic model for request input
 class TransactionInput(BaseModel):
     """Input model for transaction data - must match training features exactly."""
+    upiId: str = Field(..., description="UPI ID of the transaction")
     transactionAmount: float = Field(..., description="Transaction amount")
     transactionAmountDeviation: float = Field(..., description="Amount deviation from normal")
     timeAnomaly: float = Field(..., ge=0, le=1, description="Time anomaly score (0-1)")
     locationDistance: float = Field(..., description="Distance from usual location")
     merchantNovelty: float = Field(..., ge=0, le=1, description="Merchant novelty score (0-1)")
     transactionFrequency: float = Field(..., description="Transaction frequency")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "transactionAmount": 150.50,
-                "transactionAmountDeviation": 0.25,
-                "timeAnomaly": 0.3,
-                "locationDistance": 25.0,
-                "merchantNovelty": 0.2,
-                "transactionFrequency": 5
-            }
-        }
+    mode: Literal["fast", "accurate"] = Field(default="fast", description="Model mode: 'fast' or 'accurate'")
 
 # Pydantic model for response output
 class FraudPrediction(BaseModel):
     """Output model for fraud prediction results."""
-    fraud: bool = Field(..., description="True if fraud detected, False if legitimate")
-    risk_score: float = Field(..., ge=0, le=1, description="Risk score between 0 and 1")
-    explanation: Optional[str] = Field(None, description="AI-generated explanation for the prediction")
+    fraud: bool
+    risk_score: float
+    model_used: str
+    recurring_fraud_upi: bool
+    fraud_count: int
+    explanation: Optional[str] = None
 
-def load_model():
-    """
-    Load the trained ML model from disk.
-    This function is called at application startup.
-    """
-    global model
-    try:
-        if not os.path.exists(MODEL_PATH):
-            raise FileNotFoundError(f"Model file not found at {MODEL_PATH}")
-        
-        model = joblib.load(MODEL_PATH)
-        print(f"[OK] Model loaded successfully from {MODEL_PATH}")
-        return model
-    except Exception as e:
-        print(f"[ERROR] Error loading model: {str(e)}")
-        raise
+# Fraud History Management
+def load_fraud_history():
+    if os.path.exists(FRAUD_HISTORY_FILE):
+        try:
+            with open(FRAUD_HISTORY_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_fraud_history(history):
+    with open(FRAUD_HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
+
+def update_fraud_history(upi_id: str, is_fraud: bool):
+    history = load_fraud_history()
+
+    if upi_id not in history:
+        history[upi_id] = {"fraud_count": 0}
+
+    if is_fraud:
+        history[upi_id]["fraud_count"] += 1
+
+    history[upi_id]["last_seen"] = datetime.utcnow().isoformat()
+    save_fraud_history(history)
+
+    return history[upi_id]["fraud_count"]
+
+def is_recurring_fraud_upi(upi_id: str) -> bool:
+    history = load_fraud_history()
+    return history.get(upi_id, {}).get("fraud_count", 0) >= 3
+
+def load_models():
+    global model_fast, model_accurate
+    model_fast = joblib.load(FAST_MODEL_PATH)
+    model_accurate = joblib.load(ACCURATE_MODEL_PATH)
 
 @app.on_event("startup")
 async def startup_event():
-    """Load the ML model when the API starts."""
-    print("Starting Fraud Detection API...")
-    try:
-        load_model()
-        print("API ready to accept requests!")
-    except Exception as e:
-        print(f"Failed to start API: {e}")
-        raise
-
-@app.get("/")
-async def root():
-    """Root endpoint - API information."""
-    return {
-        "message": "Fraud Detection API",
-        "version": "1.0.0",
-        "endpoints": {
-            "predict": "/predict",
-            "docs": "/docs"
-        }
-    }
+    load_models()
+    if not os.path.exists(FRAUD_HISTORY_FILE):
+        save_fraud_history({})
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
     return {
-        "status": "healthy",
-        "model_loaded": model is not None
+        "status": "ok",
+        "fast_model_loaded": model_fast is not None,
+        "accurate_model_loaded": model_accurate is not None
     }
 
 @app.post("/predict", response_model=FraudPrediction)
 async def predict_fraud(transaction: TransactionInput):
-    """
-    Predict if a transaction is fraudulent.
-    
-    Accepts transaction data and returns:
-    - fraud: boolean (True = Fraud, False = Legit)
-    - risk_score: float (0-1, higher = more risky)
-    """
-    if model is None:
-        raise HTTPException(status_code=500, detail="Model not loaded")
-    
-    try:
-        # Prepare features in the exact order used during training
-        features = np.array([[
-            transaction.transactionAmount,
-            transaction.transactionAmountDeviation,
-            transaction.timeAnomaly,
-            transaction.locationDistance,
-            transaction.merchantNovelty,
-            transaction.transactionFrequency
-        ]])
-        
-        # Get prediction (0 = Legit, 1 = Fraud)
-        prediction = model.predict(features)[0]
-        
-        # Get probability/confidence score
-        # predict_proba returns [prob_class_0, prob_class_1]
-        probabilities = model.predict_proba(features)[0]
-        fraud_probability = probabilities[1]  # Probability of fraud (class 1)
-        
-        # Convert to boolean and return
-        is_fraud = bool(prediction == 1)
-        
-        # Get AI explanation
-        explanation = get_ai_explanation(transaction, is_fraud, fraud_probability)
+    model = model_fast if transaction.mode == "fast" else model_accurate
 
-        return FraudPrediction(
-            fraud=is_fraud,
-            risk_score=round(float(fraud_probability), 4),
-            explanation=explanation
-        )
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Prediction error: {str(e)}"
-        )
+    base_features = [
+        transaction.transactionAmount,
+        transaction.transactionAmountDeviation,
+        transaction.timeAnomaly,
+        transaction.locationDistance,
+        transaction.merchantNovelty,
+        transaction.transactionFrequency
+    ]
+
+    if transaction.mode == "accurate":
+        features = np.array([base_features + [
+            transaction.transactionAmount * transaction.locationDistance,
+            transaction.transactionAmountDeviation * transaction.merchantNovelty,
+            transaction.timeAnomaly / (transaction.transactionFrequency + 1)
+        ]])
+    else:
+        features = np.array([base_features])
+
+    prediction = model.predict(features)[0]
+    probability = model.predict_proba(features)[0][1]
+    is_fraud = prediction == 1
+
+    fraud_count = update_fraud_history(transaction.upiId, is_fraud)
+    recurring = fraud_count >= 3
+
+    explanation = get_ai_explanation(transaction, is_fraud, probability)
+
+    return FraudPrediction(
+        fraud=is_fraud,
+        risk_score=round(float(probability), 4),
+        model_used=transaction.mode,
+        recurring_fraud_upi=recurring,
+        fraud_count=fraud_count,
+        explanation=explanation
+    )
 
 def get_ai_explanation(transaction: TransactionInput, is_fraud: bool, risk_score: float) -> Optional[str]:
-    """Calls the explanation service to get an AI-generated explanation."""
-    # Get explanation service URL from environment variable, fallback to localhost for local dev
-    explanation_service_url = os.getenv("EXPLANATION_SERVICE_URL", "http://localhost:8081")
-    url = f"{explanation_service_url}/explain"
-    
     payload = {
         "transactionAmount": transaction.transactionAmount,
         "transactionAmountDeviation": transaction.transactionAmountDeviation,
@@ -179,31 +176,14 @@ def get_ai_explanation(transaction: TransactionInput, is_fraud: bool, risk_score
         "isFraud": is_fraud,
         "riskScore": risk_score
     }
-    
+
     try:
-        # Increased timeout to 30 seconds to handle model generation time
-        response = requests.post(url, json=payload, timeout=30)
-        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
-        result = response.json().get("explanation")
-        if result:
-            return result
-        else:
-            print("[WARNING] Explanation service returned empty explanation")
-            return None
-    except requests.exceptions.Timeout:
-        print("[ERROR] Explanation service timeout (exceeded 30 seconds)")
-        return "AI explanation service is taking too long to respond."
-    except requests.exceptions.ConnectionError as e:
-        print(f"[ERROR] Could not connect to explanation service at {url}: {e}")
+        response = requests.post(EXPLANATION_SERVICE_URL, json=payload, timeout=30)
+        response.raise_for_status()
+        return response.json().get("explanation")
+    except Exception:
         return "AI explanation service is currently unavailable."
-    except requests.exceptions.RequestException as e:
-        print(f"[ERROR] Error calling explanation service: {type(e).__name__}: {e}")
-        return "AI explanation service encountered an error."
-    except Exception as e:
-        print(f"[ERROR] Unexpected error getting explanation: {type(e).__name__}: {e}")
-        return None
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-

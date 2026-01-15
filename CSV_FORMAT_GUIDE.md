@@ -1,87 +1,77 @@
-# CSV Format Guide for Fraud Detection Batch Processing
+# CSV/Excel Format Guide for Fraud Detection
 
-## Required CSV Format
+## Required Format
 
-The CSV file must contain the following columns in this exact order:
-
-### Column Headers (First Row)
-```
-transactionAmount,transactionAmountDeviation,timeAnomaly,locationDistance,merchantNovelty,transactionFrequency
-```
-
-### Column Descriptions
-
-| Column Name | Type | Description | Example Values |
-|------------|------|-------------|----------------|
-| `transactionAmount` | Number (decimal) | The transaction amount | 150.50, 2500.00, 6200.00 |
-| `transactionAmountDeviation` | Number (decimal) | Amount deviation from normal spending patterns (0.0 to 1.0+) | 0.15, 0.65, 0.35 |
-| `timeAnomaly` | Number (decimal) | Time anomaly score (0.0 to 1.0) | 0.2, 0.85, 0.0 |
-| `locationDistance` | Number (decimal) | Distance from usual location in kilometers | 5.0, 45.0, 28.0 |
-| `merchantNovelty` | Number (decimal) | Merchant novelty score (0.0 to 1.0) | 0.1, 0.9, 1.0 |
-| `transactionFrequency` | Number (decimal/integer) | Transaction frequency count | 8, 2, 6 |
-
-### Important Notes
-
-1. **Header Row**: The first row must contain the column headers exactly as shown above
-2. **Data Types**: All values must be numeric (decimal numbers)
-3. **Order**: Columns must be in the exact order listed above
-4. **Separator**: Use comma (`,`) as the field separator
-5. **No Spaces**: Avoid spaces around column names in the header row
-
-### Example CSV Content
+The CSV/Excel file **MUST** follow this exact format with **UPI ID** as the first column:
 
 ```csv
-transactionAmount,transactionAmountDeviation,timeAnomaly,locationDistance,merchantNovelty,transactionFrequency
-150.50,0.15,0.2,5.0,0.1,8
-2500.00,0.65,0.85,45.0,0.9,2
-75.25,0.10,0.1,3.0,0.05,12
-6200.00,0.35,0.0,28.0,1.0,6
+upiId,transactionAmount,transactionAmountDeviation,timeAnomaly,locationDistance,merchantNovelty,transactionFrequency
 ```
 
-### Sample Data Ranges
+## Column Order (CRITICAL)
 
-**Legitimate Transactions (Low Risk):**
-- transactionAmount: 50-500
-- transactionAmountDeviation: 0.0-0.3
-- timeAnomaly: 0.0-0.3
-- locationDistance: 0-15 km
-- merchantNovelty: 0.0-0.3
-- transactionFrequency: 5-20
+Columns must be in this **exact order**:
 
-**Fraudulent Transactions (High Risk):**
-- transactionAmount: 2000-10000+
-- transactionAmountDeviation: 0.5-1.0+
-- timeAnomaly: 0.6-1.0
-- locationDistance: 30-100+ km
-- merchantNovelty: 0.7-1.0
-- transactionFrequency: 1-3
+1. **upiId** (string) - UPI identifier (e.g., "user123@upi", "scammer01@upi")
+2. **transactionAmount** (number) - Transaction amount
+3. **transactionAmountDeviation** (number) - Amount deviation from normal (0.0-1.0+)
+4. **timeAnomaly** (number) - Time anomaly score (0.0-1.0)
+5. **locationDistance** (number) - Distance from usual location in kilometers
+6. **merchantNovelty** (number) - Merchant novelty score (0.0-1.0)
+7. **transactionFrequency** (number) - Transaction frequency count
 
-### Example Test CSV Files
+## Example CSV
 
-1. **sample_transactions.csv** - Contains mixed legitimate and fraudulent transactions
-2. You can create your own CSV file using Excel, Google Sheets, or any text editor
+```csv
+upiId,transactionAmount,transactionAmountDeviation,timeAnomaly,locationDistance,merchantNovelty,transactionFrequency
+user001@upi,150.50,0.15,0.2,5.0,0.1,8
+scammer01@upi,2500.00,0.65,0.85,45.0,0.9,2
+user002@upi,75.25,0.10,0.1,3.0,0.05,12
+```
 
-### How to Use
+## Column Details
 
-1. Create a CSV file following the format above
-2. In the Fraud Detection app, click "Upload CSV / Excel"
-3. Select your CSV file
-4. The app will automatically process all transactions and display results
+| Column | Type | Description | Example Values |
+|--------|------|-------------|----------------|
+| `upiId` | String | Unique identifier for the transaction UPI | `user123@upi`, `scammer01@upi` |
+| `transactionAmount` | Number | Transaction amount in currency | `150.50`, `2500.00` |
+| `transactionAmountDeviation` | Number | Deviation from normal spending (0.0-1.0+) | `0.15`, `0.65` |
+| `timeAnomaly` | Number | Time anomaly score indicating unusual timing (0.0-1.0) | `0.2`, `0.85` |
+| `locationDistance` | Number | Distance from usual transaction location in kilometers | `5.0`, `45.0` |
+| `merchantNovelty` | Number | Merchant novelty score (0.0 = familiar, 1.0 = new merchant) | `0.1`, `0.9` |
+| `transactionFrequency` | Number | Number of transactions in the time period | `8`, `2` |
 
-### Common Errors to Avoid
+## Important Notes
 
-❌ Missing header row
-❌ Wrong column order
-❌ Non-numeric values
-❌ Empty rows in the middle of data
-❌ Missing commas or extra spaces
-❌ Special characters in numeric fields
+✅ **Header row is required** - The first row must contain column names  
+✅ **7 columns total** - Must include UPI ID as the first column  
+✅ **All values must be valid** - Invalid rows will be skipped with error messages  
+✅ **UPI ID is used for tracking** - Same UPI ID across uploads will track fraud history  
+✅ **No fraud labels** - The CSV should NOT contain fraud prediction labels (this is prediction only, not training data)  
 
-✅ Include header row
-✅ Use exact column names
-✅ All values are numbers
-✅ One row per transaction
-✅ Clean formatting
-✅ Only numeric data in value columns
+## Recurring Fraud Detection
 
+The system tracks UPI IDs across multiple CSV uploads:
+- If a UPI ID has **3 or more fraud records**, it will be flagged as **Recurring Fraud UPI**
+- Recurring fraud UPIs are highlighted in the results table
+- Fraud history persists across app sessions via `fraud_history.json`
 
+## Sample File
+
+See `sample_transactions.csv` for a ready-to-use test file with:
+- 15 sample transactions
+- Mix of legitimate and fraudulent patterns
+- Example recurring fraud UPIs (scammer01@upi appears multiple times)
+
+## Supported File Formats
+
+- ✅ `.csv` - Comma-separated values
+- ✅ `.xlsx` - Excel 2007+ format
+- ✅ `.xls` - Excel 97-2003 format
+
+## Batch Processing
+
+- Transactions are processed in batches of 10
+- Progress is shown in real-time
+- Errors in individual rows don't stop the batch processing
+- Results are displayed in an interactive table
