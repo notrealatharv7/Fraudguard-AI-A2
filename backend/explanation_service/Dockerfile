@@ -1,24 +1,18 @@
-# Use an official Python runtime as a parent image
-FROM python:3.9-slim
+FROM python:3.10-slim
 
-# Set the working directory in the container
 WORKDIR /app
 
-# Copy the dependencies file to the working directory
-COPY requirements.txt .
+# Copy requirements
+COPY backend/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir --force-reinstall -r requirements.txt
 
-# Install any needed packages specified in requirements.txt
-# We use --no-cache-dir to reduce image size
-RUN pip install --no-cache-dir -r requirements.txt
+# Create ml directory before copying model
+RUN mkdir -p ml
 
-# Copy the content of the local src directory to the working directory
-COPY . .
+# Copy backend files
+COPY backend/main.py ./main.py
+COPY backend/ml/model.pkl ./ml/model.pkl
 
-# Make port 8001 available to the world outside this container
-EXPOSE 8001
+EXPOSE 8000
 
-# Define environment variable
-ENV NAME World
-
-# Run main.py when the container launches
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
