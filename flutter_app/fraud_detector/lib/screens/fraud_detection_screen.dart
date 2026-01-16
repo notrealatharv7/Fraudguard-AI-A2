@@ -6,6 +6,7 @@ import 'package:fraud_detector/services/api_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:csv/csv.dart';
 import 'package:excel/excel.dart' hide Border;
+import 'package:fraud_detector/widgets/deviation_trends_chart.dart';
 
 class FraudDetectionScreen extends StatefulWidget {
   const FraudDetectionScreen({super.key});
@@ -1028,9 +1029,23 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
             ),
           ),
           const Divider(height: 1),
+          // Multi-Line Trend Chart
+           Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: SizedBox(
+                height: 400,
+                child: DeviationTrendsChart(
+                    transactions: _filteredBatchResults.map((r) => r.transaction).toList(),
+                    isDarkTheme: false,
+                ),
+            ),
+          ),
+          const Divider(height: 1),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: DataTable(
+              dataRowMinHeight: 60, // Allow minimum height for 2 lines
+              dataRowMaxHeight: 100, // Expand up to 100px for longer explanations
               headingRowColor: WidgetStateProperty.resolveWith(
                 (states) => Theme.of(context).colorScheme.surfaceContainerHighest,
               ),
@@ -1038,8 +1053,9 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
                 DataColumn(label: Text('Row #')),
                 DataColumn(label: Text('UPI ID')),
                 DataColumn(label: Text('Amount'), numeric: true),
-                DataColumn(label: Text('Distance (km)'), numeric: true),
-                DataColumn(label: Text('Time Anomaly'), numeric: true),
+                DataColumn(label: Text('Distance'), numeric: true),
+                DataColumn(label: Text('Merch Nov'), numeric: true), // Added Column
+                DataColumn(label: Text('Time Anom'), numeric: true),
                 DataColumn(label: Text('Risk %'), numeric: true),
                 DataColumn(label: Text('Model')),
                 DataColumn(label: Text('Status')),
@@ -1091,6 +1107,7 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
                       style: const TextStyle(fontWeight: FontWeight.w500),
                     )),
                     DataCell(Text(result.transaction.locationDistance.toStringAsFixed(1))),
+                    DataCell(Text(result.transaction.merchantNovelty.toStringAsFixed(2))), // Added Cell
                     DataCell(Text(result.transaction.timeAnomaly.toStringAsFixed(2))),
                     DataCell(Text(
                       riskPercentage,
@@ -1115,7 +1132,7 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
                     DataCell(_buildStatusBadge(isFraud)),
                     DataCell(
                       ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 300),
+                        constraints: const BoxConstraints(maxWidth: 400), // Increased width
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
@@ -1131,8 +1148,11 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
                               ),
                             Text(
                               result.prediction.explanation ?? 'No explanation available',
-                              style: Theme.of(context).textTheme.bodySmall,
-                              maxLines: 2,
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w500,
+                                height: 1.2
+                              ), // Increased Text Size
+                              maxLines: 3,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ],
