@@ -46,6 +46,7 @@ class TransactionInput(BaseModel):
     merchantNovelty: float = Field(..., ge=0, le=1, description="Merchant novelty score (0-1)")
     transactionFrequency: float = Field(..., description="Transaction frequency")
     mode: Literal["fast", "accurate"] = Field(default="fast", description="Model mode: 'fast' or 'accurate'")
+    language: Literal["en", "hi", "mr"] = Field(default="en", description="Language for explanation: 'en', 'hi', 'mr'")
 
 # Pydantic model for response output
 class FraudPrediction(BaseModel):
@@ -227,7 +228,8 @@ def get_ai_explanation(transaction: TransactionInput, is_fraud: bool, risk_score
         "merchantNovelty": transaction.merchantNovelty,
         "transactionFrequency": transaction.transactionFrequency,
         "isFraud": is_fraud,
-        "riskScore": risk_score
+        "riskScore": risk_score,
+        "language": transaction.language
     }
     
     try:

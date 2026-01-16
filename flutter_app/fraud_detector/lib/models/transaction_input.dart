@@ -9,6 +9,7 @@ class TransactionInput {
   final double merchantNovelty;
   final double transactionFrequency;
   final String mode; // "fast" or "accurate"
+  final String language; // "en", "hi", "mr"
 
   TransactionInput({
     required this.upiId,
@@ -19,6 +20,7 @@ class TransactionInput {
     required this.merchantNovelty,
     required this.transactionFrequency,
     this.mode = "fast",
+    this.language = "en",
   });
 
   /// Convert to JSON for API request
@@ -32,6 +34,7 @@ class TransactionInput {
       'merchantNovelty': merchantNovelty,
       'transactionFrequency': transactionFrequency,
       'mode': mode,
+      'language': language,
     };
   }
 }

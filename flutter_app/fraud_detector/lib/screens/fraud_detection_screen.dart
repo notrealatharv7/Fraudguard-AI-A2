@@ -43,6 +43,7 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
   };
 
   String _selectedMode = 'fast'; // 'fast' or 'accurate'
+  String _selectedLanguage = 'en'; // 'en', 'hi', 'mr'
   bool _isLoading = false;
   FraudPrediction? _prediction;
   String? _errorMessage;
@@ -84,6 +85,7 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
         merchantNovelty: double.parse(_controllers['novelty']!.text),
         transactionFrequency: double.parse(_controllers['frequency']!.text),
         mode: _selectedMode,
+        language: _selectedLanguage,
       );
 
       final prediction = await _apiService.predictFraud(transaction);
@@ -178,6 +180,7 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
             merchantNovelty: _parseDouble(row[5], 'merchantNovelty', i + 1),
             transactionFrequency: _parseDouble(row[6], 'transactionFrequency', i + 1),
             mode: _selectedMode, // Use selected mode for batch processing
+            language: _selectedLanguage, // Use selected language for batch processing
           );
 
           transactions.add(transaction);
@@ -698,6 +701,23 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 16),
+              // Language Selection
+              Text('Explanation Language', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                value: _selectedLanguage,
+                items: const [
+                  DropdownMenuItem(value: 'en', child: Text('English')),
+                  DropdownMenuItem(value: 'hi', child: Text('Hindi (हिंदी)')),
+                  DropdownMenuItem(value: 'mr', child: Text('Marathi (मराठी)')),
+                ],
+                onChanged: (value) => setState(() => _selectedLanguage = value!),
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.language),
+                ),
               ),
               const SizedBox(height: 16),
               _buildTextField(
