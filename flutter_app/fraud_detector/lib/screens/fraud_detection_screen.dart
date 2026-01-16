@@ -402,6 +402,32 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
             const SizedBox(height: 12),
             Text('Upload CSV or Excel file to process multiple transactions',
                 style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 16),
+            Text('Processing Mode:', style: Theme.of(context).textTheme.titleSmall),
+            Row(
+              children: [
+                Expanded(
+                  child: RadioListTile<String>(
+                    title: const Text('⚡ Fast'),
+                    value: 'fast',
+                    groupValue: _selectedMode,
+                    onChanged: (value) => setState(() => _selectedMode = value!),
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                  ),
+                ),
+                Expanded(
+                  child: RadioListTile<String>(
+                    title: const Text('🧠 Deep'), // Keeps the emojis consistent with the other selector
+                    value: 'accurate',
+                    groupValue: _selectedMode,
+                    onChanged: (value) => setState(() => _selectedMode = value!),
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: (_isLoading || _isProcessingBatch) ? null : _handleFileUpload,
@@ -861,12 +887,16 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  prediction.modelUsed == 'accurate' ? '🧠 Deep' : '⚡ Fast',
+                  prediction.modelUsed == 'accurate' ? '✅ Accurate' : '⚡ Fast',
                   style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                 ),
               ),
             ],
           ),
+          if (prediction.modelUsed == 'accurate') ...[
+             const SizedBox(height: 4),
+             Text('High Accuracy', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: color.withOpacity(0.8))),
+          ],
           // Recurring Fraud Warning
           if (prediction.recurringFraudUpi) ...[
             const SizedBox(height: 16),

@@ -11,8 +11,9 @@ import joblib
 import os
 
 # File paths
-CSV_FILE = 'fraud_data.csv'
-MODEL_FILE = 'model.pkl'
+# File paths
+CSV_FILE = 'fraudguard_ai_m3_transactions.csv'
+MODEL_FILE = 'backend/ml/model.pkl'
 
 def load_data():
     """Load the fraud detection dataset from CSV."""
@@ -25,7 +26,7 @@ def prepare_features(df):
     """
     Prepare features and target variable.
     Features must be in this exact order:
-    1. transactionAmount
+    1. amount (was transactionAmount)
     2. transactionAmountDeviation
     3. timeAnomaly
     4. locationDistance
@@ -34,7 +35,7 @@ def prepare_features(df):
     """
     # Define feature columns in the required order
     feature_columns = [
-        'transactionAmount',
+        'amount',
         'transactionAmountDeviation',
         'timeAnomaly',
         'locationDistance',
@@ -44,7 +45,7 @@ def prepare_features(df):
     
     # Extract features (X) and target (y)
     X = df[feature_columns]
-    y = df['fraud']  # 0 = Legit, 1 = Fraud
+    y = df['is_fraud']  # 0 = Legit, 1 = Fraud
     
     print(f"Features shape: {X.shape}")
     print(f"Target distribution:\n{y.value_counts()}")

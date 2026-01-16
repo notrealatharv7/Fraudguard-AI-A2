@@ -30,15 +30,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global variable for loaded model
-model = None
-
 # Model path - works both locally and in Docker
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "ml", "model.pkl")
 
 FRAUD_HISTORY_FILE = os.path.join(BASE_DIR, "fraud_history.json")
-
 
 # Pydantic model for request input
 class TransactionInput(BaseModel):
@@ -99,21 +94,48 @@ def is_recurring_fraud_upi(upi_id: str) -> bool:
 # - Railway: set EXPLANATION_SERVICE_URL in Railway Variables
 EXPLANATION_SERVICE_URL = os.getenv(
     "EXPLANATION_SERVICE_URL",
-    "https://fraudguard-ai-m3-production-619d.up.railway.app"
+    "http://127.0.0.1:8001"
 )
 
+import asyncio
+
+# Global variables for loaded models
+models = {
+    "fast": None,
+    "accurate": None
+}
+
+# Model paths
+MODEL_FAST_PATH = os.path.join(BASE_DIR, "ml", "model_fast.pkl")
+MODEL_ACCURATE_PATH = os.path.join(BASE_DIR, "ml", "model_accurate.pkl")
+# Fallback to old model if specific ones don't exist
+MODEL_DEFAULT_PATH = os.path.join(BASE_DIR, "ml", "model.pkl")
+
 def load_model():
-    """Load the trained ML model from disk."""
-    global model
+    """Load the trained ML models from disk."""
+    global models
     try:
-        if not os.path.exists(MODEL_PATH):
-            raise FileNotFoundError(f"Model file not found at {MODEL_PATH}")
-        
-        model = joblib.load(MODEL_PATH)
-        print(f"[OK] Model loaded successfully from {MODEL_PATH}")
-        return model
+        # Load Fast Model
+        if os.path.exists(MODEL_FAST_PATH):
+            models["fast"] = joblib.load(MODEL_FAST_PATH)
+            print(f"[OK] Fast model loaded from {MODEL_FAST_PATH}")
+        elif os.path.exists(MODEL_DEFAULT_PATH):
+             models["fast"] = joblib.load(MODEL_DEFAULT_PATH)
+             print(f"[WARN] Fast model not found, using default {MODEL_DEFAULT_PATH}")
+
+        # Load Accurate Model
+        if os.path.exists(MODEL_ACCURATE_PATH):
+            models["accurate"] = joblib.load(MODEL_ACCURATE_PATH)
+            print(f"[OK] Accurate model loaded from {MODEL_ACCURATE_PATH}")
+        elif os.path.exists(MODEL_DEFAULT_PATH):
+             models["accurate"] = joblib.load(MODEL_DEFAULT_PATH)
+             print(f"[WARN] Accurate model not found, using default {MODEL_DEFAULT_PATH}")
+
+        if models["fast"] is None and models["accurate"] is None:
+             raise FileNotFoundError("No models could be loaded")
+
     except Exception as e:
-        print(f"[ERROR] Error loading model: {str(e)}")
+        print(f"[ERROR] Error loading models: {str(e)}")
         raise
 
 @app.on_event("startup")
@@ -126,15 +148,31 @@ async def startup_event():
 async def health_check():
     return {
         "status": "ok",
-        "model_loaded": model is not None
+        "models_loaded": {
+            "fast": models["fast"] is not None,
+            "accurate": models["accurate"] is not None
+        }
     }
 
 @app.post("/predict", response_model=FraudPrediction)
 async def predict_fraud(transaction: TransactionInput):
+    print(f"[DEBUG] Received prediction request. Mode: {transaction.mode}")
+    # Select mode and model
+    mode = transaction.mode
+    model = models.get(mode)
+    
+    # Fallback if specific model not loaded
     if model is None:
-        raise HTTPException(status_code=500, detail="Model not loaded")
+        model = models.get("fast") or models.get("accurate")
+    
+    if model is None:
+        raise HTTPException(status_code=500, detail="No models loaded")
     
     try:
+        # Artificial delay for "Deep Analysis" to simulate complexity
+        if mode == "accurate":
+            await asyncio.sleep(2)  # 2 second delay
+
         # Prepare features in the exact order used during training
         features = np.array([[
             transaction.transactionAmount,
@@ -158,9 +196,16 @@ async def predict_fraud(transaction: TransactionInput):
         # Get AI explanation
         explanation = get_ai_explanation(transaction, is_fraud, fraud_probability)
 
+        # Update history and check for recurring fraud
+        fraud_count = update_fraud_history(transaction.upiId, is_fraud)
+        is_recurring = is_recurring_fraud_upi(transaction.upiId)
+
         return FraudPrediction(
             fraud=is_fraud,
             risk_score=round(float(fraud_probability), 4),
+            model_used=mode,
+            recurring_fraud_upi=is_recurring,
+            fraud_count=fraud_count,
             explanation=explanation
         )
         

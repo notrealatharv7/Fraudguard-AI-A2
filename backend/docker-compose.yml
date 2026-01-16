@@ -9,7 +9,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - EXPLANATION_SERVICE_URL=http://explanation_service:8001/explain
+      - EXPLANATION_SERVICE_URL=http://explanation_service:8000/explain
     depends_on:
       - explanation_service
     restart: always

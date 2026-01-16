@@ -14,7 +14,11 @@ class ApiService {
   // For Physical Device: use 'http://YOUR_COMPUTER_IP:8000'
   //   (Find your IP with: ipconfig on Windows, ifconfig on Mac/Linux)
   
-  static const String baseUrl = 'http://10.0.2.2:8000';
+  // Base URL - updated for Web support
+  // For Web/iOS/Desktop: localhost
+  // For Android Emulator: 10.0.2.2
+  
+  static const String baseUrl = 'http://127.0.0.1:8000';
 
   // Uncomment one of these based on your setup:
   // static const String baseUrl = 'http://10.0.2.2:8000';      // Android emulator
