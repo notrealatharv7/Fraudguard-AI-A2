@@ -1133,7 +1133,7 @@ class _FraudDetectionScreenState extends State<FraudDetectionScreen> {
                       riskPercentage,
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: isFraud ? Colors.red : Colors.green,
+                        color: isFraud ? Colors.red.shade900 : Colors.green.shade900,
                       ),
                     )),
                     DataCell(
